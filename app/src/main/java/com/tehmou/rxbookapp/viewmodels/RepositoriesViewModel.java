@@ -13,6 +13,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import rx.Observable;
+import rx.android.internal.Preconditions;
 import rx.functions.Func1;
 import rx.observables.ConnectableObservable;
 import rx.subjects.BehaviorSubject;
@@ -32,25 +33,80 @@ public class RepositoriesViewModel extends AbstractViewModel {
 
     private static final int MAX_REPOSITORIES_DISPLAYED = 5;
 
+    @NonNull
     private final DataLayer.GetGitHubRepositorySearch getGitHubRepositorySearch;
+
+    @NonNull
     private final DataLayer.GetGitHubRepository getGitHubRepository;
 
     private final PublishSubject<Observable<String>> searchString = PublishSubject.create();
     private final PublishSubject<GitHubRepository> selectRepository = PublishSubject.create();
 
-    private final BehaviorSubject<List<GitHubRepository>> repositories
-            = BehaviorSubject.create();
+    private final BehaviorSubject<List<GitHubRepository>> repositories = BehaviorSubject.create();
     private final BehaviorSubject<ProgressStatus> networkRequestStatusText = BehaviorSubject.create();
 
-    public RepositoriesViewModel(DataLayer.GetGitHubRepositorySearch getGitHubRepositorySearch,
-                                 DataLayer.GetGitHubRepository getGitHubRepository) {
+    public RepositoriesViewModel(@NonNull DataLayer.GetGitHubRepositorySearch getGitHubRepositorySearch,
+                                 @NonNull DataLayer.GetGitHubRepository getGitHubRepository) {
+        Preconditions.checkNotNull(getGitHubRepository, "GitHub Repository cannot be null.");
+        Preconditions.checkNotNull(getGitHubRepositorySearch,
+                                   "GitHub Repository Store cannot be null.");
+
         this.getGitHubRepositorySearch = getGitHubRepositorySearch;
         this.getGitHubRepository = getGitHubRepository;
         Log.v(TAG, "RepositoriesViewModel");
     }
 
+    @NonNull
+    public Observable<GitHubRepository> getSelectRepository() {
+        return selectRepository.asObservable();
+    }
+
+    @NonNull
+    public Observable<List<GitHubRepository>> getRepositories() {
+        return repositories.asObservable();
+    }
+
+    @NonNull
+    public Observable<ProgressStatus> getNetworkRequestStatusText() {
+        return networkRequestStatusText.asObservable();
+    }
+
+    public void setSearchStringObservable(@NonNull Observable<String> searchStringObservable) {
+        Preconditions.checkNotNull(searchStringObservable, "Search Observable cannot be null.");
+
+        this.searchString.onNext(searchStringObservable);
+    }
+
+    public void selectRepository(@NonNull GitHubRepository repository) {
+        Preconditions.checkNotNull(repository, "Repository cannot be null.");
+
+        this.selectRepository.onNext(repository);
+    }
+
+    @NonNull
+    static Func1<DataStreamNotification<GitHubRepositorySearch>, ProgressStatus> toProgressStatus() {
+        return notification -> {
+            if (notification.isFetchingStart()) {
+                return ProgressStatus.LOADING;
+            } else if (notification.isFetchingError()) {
+                return ProgressStatus.ERROR;
+            } else {
+                return ProgressStatus.IDLE;
+            }
+        };
+    }
+
+    @NonNull
+    Func1<List<Integer>, Observable<List<GitHubRepository>>> toGitHubRepositoryList() {
+        return repositoryIds -> Observable.from(repositoryIds)
+                                          .take(MAX_REPOSITORIES_DISPLAYED)
+                                          .map(this::getGitHubRepositoryObservable)
+                                          .toList()
+                                          .flatMap(RxUtils::toObservableList);
+    }
+
     @Override
-    protected void subscribeToDataStoreInternal(CompositeSubscription compositeSubscription) {
+    protected void subscribeToDataStoreInternal(@NonNull CompositeSubscription compositeSubscription) {
         Log.v(TAG, "subscribeToDataStoreInternal");
 
         ConnectableObservable<DataStreamNotification<GitHubRepositorySearch>> repositorySearchSource =
@@ -77,55 +133,15 @@ public class RepositoriesViewModel extends AbstractViewModel {
     }
 
     @NonNull
-    Func1<List<Integer>, Observable<List<GitHubRepository>>> toGitHubRepositoryList() {
-        return repositoryIds -> Observable.from(repositoryIds)
-                .take(MAX_REPOSITORIES_DISPLAYED)
-                .map(this::getGitHubRepositoryObservable)
-                .toList()
-                .flatMap(RxUtils::toObservableList);
-    }
-
-    @NonNull
-    private Observable<GitHubRepository> getGitHubRepositoryObservable(Integer repositoryId) {
+    private Observable<GitHubRepository> getGitHubRepositoryObservable(@NonNull Integer repositoryId) {
         return getGitHubRepository.call(repositoryId)
                                   .doOnNext((repository) -> Log.v(TAG, "Received repository "
                                                                        + repository.getId()));
     }
 
-    @NonNull
-    static Func1<DataStreamNotification<GitHubRepositorySearch>, ProgressStatus> toProgressStatus() {
-        return notification -> {
-            if (notification.isFetchingStart()) {
-                return ProgressStatus.LOADING;
-            } else if (notification.isFetchingError()) {
-                return ProgressStatus.ERROR;
-            } else {
-                return ProgressStatus.IDLE;
-            }
-        };
-    }
+    private void setNetworkStatusText(@NonNull ProgressStatus status) {
+        Preconditions.checkNotNull(status, "Status cannot be null.");
 
-    private void setNetworkStatusText(ProgressStatus status) {
         networkRequestStatusText.onNext(status);
-    }
-
-    public Observable<List<GitHubRepository>> getRepositories() {
-        return repositories;
-    }
-
-    public Observable<ProgressStatus> getNetworkRequestStatusText() {
-        return networkRequestStatusText;
-    }
-
-    public void setSearchStringObservable(Observable<String> searchStringObservable) {
-        this.searchString.onNext(searchStringObservable);
-    }
-
-    public void selectRepository(GitHubRepository repository) {
-        this.selectRepository.onNext(repository);
-    }
-
-    public Observable<GitHubRepository> getSelectRepository() {
-        return selectRepository;
     }
 }
